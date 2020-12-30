@@ -25,7 +25,6 @@ class RayCast(object):
         self.precast_map_angle_id = np.zeros((grid_num, grid_num))
         self.precast_map_range = np.zeros((grid_num, grid_num))
         self.grid_map = np.zeros((grid_num, grid_num))
-        self.raycast_map = np.zeros((grid_num, grid_num))
         self.ob_data = ob_data
         self.robot_data = robot_data
         self.human_data = [None]

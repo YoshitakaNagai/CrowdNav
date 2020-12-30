@@ -1,4 +1,5 @@
 import numpy as np
+import math
 from crowd_sim.envs.utils.raycast import LiDAR
 
 class TemporalGridMap(object):
@@ -6,7 +7,9 @@ class TemporalGridMap(object):
         self.map_width = map_width
         self.grid_num = bev_map.shape[0]
         self.grid_resolution = map_width / self.grid_num
+        self.raycast_map = np.zeros((grid_num, grid_num))
         self.lidar = lidar
+        self.ray_num = len(lidar)
 
     def bev_generator(self):
         for angle_id in range(self.ray_num):
