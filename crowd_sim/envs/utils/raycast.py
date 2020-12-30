@@ -113,16 +113,6 @@ class RayCast(object):
                     if target_range < self.lidar.ranges[target_angle_id]:
                         self.lidar.ranges[target_angle_id] = target_range
 
-    def bev_generator(self):
-        for angle_id in range(self.ray_num):
-            ray_robotcs_x = self.lidar.ranges[angle_id] * math.cos(self.lidar.angle_increment * float(angle_id))
-            ray_robotcs_y = self.lidar.ranges[angle_id] * math.sin(self.lidar.angle_increment * float(angle_id))
-            hit_gridcs_rerow = 0.5 * self.map_width - ray_robotcs_y
-            hit_gridcs_recol = 0.5 * self.map_width - ray_robotcs_x
-            hit_row = math.floor(hit_gridcs_rerow / self.grid_resolution)
-            hit_col = math.floor(hit_gridcs_recol / self.grid_resolution)
-            if (0 <= hit_row and hit_row <= self.grid_num) and (0 <= hit_col and hit_col <= self.grid_num):
-                self.raycast_map[hit_row, hit_col] = 1.0
     
     def executor(self):
         self.precast()
@@ -130,16 +120,5 @@ class RayCast(object):
         self.human_transformer()
         self.grid_plotter()
         self.lidar_raycast()
-        self.bev_generator()
-        return self.raycast_map
+        return self.lidar
         
-
-
-
-
-
-
-
-
-
-    
