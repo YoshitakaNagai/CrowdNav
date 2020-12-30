@@ -15,7 +15,7 @@ class LiDAR(object):
         self.ranges = [100.0] * ray_num
 
 class RayCast(object):
-    def __init__(self, map_width, grid_num, ray_fov, ray_num, robot_data):
+    def __init__(self, map_width, grid_num, ray_fov, ray_num, robot_data, ob_data, human_num, human_action_num):
         self.map_width = map_width
         self.grid_num = grid_num
         self.grid_resolution
@@ -26,8 +26,11 @@ class RayCast(object):
         self.precast_map_range = np.zeros((grid_num, grid_num))
         self.grid_map = np.zeros((grid_num, grid_num))
         self.raycast_map = np.zeros((grid_num, grid_num))
+        self.ob_data = ob_data
         self.robot_data = robot_data
         self.human_data = [None]
+        self.human_num = human_num
+        self.human_action_num = human_action_num
         self.robotcs_human_data = [None]
         self.lidar = LiDAR(ray_num, ray_fov)
         self.human_distance_list = [None]
@@ -59,10 +62,10 @@ class RayCast(object):
                 self.precast_map_angle_id[row, col] = get_angle_id(relative_robotcs_angle)
                 self.precast_map_range[row, col] = self.get_distance(relative_robotcs_x, relative_robotcs_y)
 
-    def human_loader(self, ob_data, human_num, human_action_num):
+    def human_loader(self):
         self.human_data.clear()
-        for human_id, action_id in zip(human_num, human_action_num):
-            self.human_data.append(ob_data[human_id])
+        for human_id, action_id in zip(self.human_num, self.human_action_num):
+            self.human_data.append(self.ob_data[human_id])
 
     def human_transformer(self):
         self.robotcs_human_data = copy.deepcopy(self.human_data)
@@ -120,10 +123,16 @@ class RayCast(object):
             hit_col = math.floor(hit_gridcs_recol / self.grid_resolution)
             if (0 <= hit_row and hit_row <= self.grid_num) and (0 <= hit_col and hit_col <= self.grid_num):
                 self.raycast_map[hit_row, hit_col] = 1.0
-                    
-
-
-
+    
+    def executor(self):
+        self.precast()
+        self.human_loader()
+        self.human_transformer()
+        self.grid_plotter()
+        self.lidar_raycast()
+        self.bev_generator()
+        return self.raycast_map
+        
 
 
 
