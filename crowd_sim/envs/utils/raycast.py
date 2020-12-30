@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 import math
 from crowd_sim.envs.utils.human import Human
@@ -27,11 +28,23 @@ class RayCast(object):
         self.raycast_map = np.zeros((grid_num, grid_num))
         self.robot_data = robot_data
         self.human_data = [None]
+        self.robotcs_human_data = [None]
         self.lidar = LiDAR(ray_num, ray_fov)
+        self.human_distance_list = [None]
+        self.robotcs_human_list = [None]
+
+    def pipi_to_twopi(self, angle):
+        while angle < 0:
+            angle += 2 * math.py
+        return angle
+
+    def twopi_to_pipi(self, angle):
+        while angle > math.pi:
+            angle -= 2 * math.py
+        return angle
 
     def get_angle_id(self, angle):
-        if angle < 0:
-            angle += 2 * math.py
+        angle = self.pipi_to_2pi(angle)
         return math.floor(angle / self.angle_resolution)
     
     def get_distance(x, y):
@@ -44,23 +57,30 @@ class RayCast(object):
                 relative_robotcs_y = 0.5 * self.grid_resolution - (float(row) + 0.5) * grid_resolution
                 relative_robotcs_angle = math.atan2(relative_robotcs_y, relative_robotcs_x)
                 self.precast_map_angle_id[row, col] = get_angle_id(relative_robotcs_angle)
-                self.precast_map_range[row, col] = get_distance(relative_robotcs_x, relative_robotcs_y)
+                self.precast_map_range[row, col] = self.get_distance(relative_robotcs_x, relative_robotcs_y)
 
     def human_loader(self, ob_data, human_num, human_action_num):
         self.human_data.clear()
         for human_id, action_id in zip(human_num, human_action_num):
             self.human_data.append(ob_data[human_id])
-            
-    def human_transformer(self):
-        for human_id in range(len(self.human_data)):
-            self.human_data[human_id].px = self.human_data[human_id].px - self.robot_data.px
-            self.human_data[human_id].py = self.human_data[human_id].py - self.robot_data.py
 
+    def human_transformer(self):
+        self.robotcs_human_data = copy.deepcopy(self.human_data)
+        for human_id in range(len(self.human_data)):
+            human_dxg = self.human_data[human_id].px - self.robot_data.px
+            human_dyg = self.human_data[human_id].py - self.robot_data.py
+            human_distance = self.get_distance(human_dxg, human_dyg)
+            human_directiong = math.atan2(human_dy, human_dx)
+            human_directionr = human_directiong + twopi_to_pipi(robot_data.theta)
+            human_directionr = twopi_to_pipi(human_directionr)
+            robotcs_human_data[human_id].px = human_distance * math.cos(human_directionr)
+            robotcs_human_data[human_id].py = human_distance * math.sin(human_directionr)
+            
     def grid_plotter(self):
         human_grid_list = [None]
-        for human_id in range(len(self.human_data)):
-            human_robotcs_x = self.human_data[human_id].px
-            human_robotcs_y = self.human_data[human_id].py
+        for human_id in range(len(self.robotcs_human_data)):
+            human_robotcs_x = self.robotcs_human_data[human_id].px
+            human_robotcs_y = self.robotcs_human_data[human_id].py
             on_gridcs_rerow = 0.5 * self.map_width - human_robotcs_y
             on_gridcs_recol = 0.5 * self.map_width - human_robotcs_x
             on_row = math.floor(on_gridcs_rerow / self.grid_resolution)
@@ -77,11 +97,11 @@ class RayCast(object):
                 for row in range(self.grid_num):
                     relative_rerow = self.grid_resolution * (row - target_cell.row)
                     relative_recol = self.grid_resolution * (row - target_cell.col)
-                    distance = get_distance(relative_rerow, relative_recol)
-                    if distance < self.human_data[target_human_id].radius:
+                    distance = self.get_distance(relative_rerow, relative_recol)
+                    if distance < self.robotcs_human_data[target_human_id].radius:
                         self.grid_map[row, col] = 1.0
 
-    def raycast(self):
+    def lidar_raycast(self):
         for col in range(self.grid_num):
             for row in range(self.grid_num):
                 if self.grid_map > 0:
