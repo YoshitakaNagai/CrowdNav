@@ -2,17 +2,9 @@ import copy
 import numpy as np
 import math
 from crowd_sim.envs.utils.human import Human
+from crowd_sim.envs.utils.lidar import LiDAR
+from crowd_sim.envs.utils.cell import Cell
 
-class Cell(object):
-    def __init__(self, row, col, agent_id):
-        self.row = row
-        self.col = col
-        self.agent_id = agent_id
-
-class LiDAR(object):
-    def __init__(self, ray_num, horizontal_fov):
-        self.angle_increment = horizontal_fov / float(ray_num)
-        self.ranges = [100.0] * ray_num
 
 class RayCast(object):
     def __init__(self, map_width, grid_num, ray_fov, ray_num, robot_data, ob_data, human_num, human_action_num):
@@ -55,10 +47,10 @@ class RayCast(object):
     def precast(self):
         for col in range(self.grid_num):
             for row in range(self.grid_num):
-                relative_robotcs_x = 0.5 * self.grid_resolution - (float(col) + 0.5) * grid_resolution
-                relative_robotcs_y = 0.5 * self.grid_resolution - (float(row) + 0.5) * grid_resolution
+                relative_robotcs_x = 0.5 * self.map_width - (float(col) + 0.5) * self.grid_resolution
+                relative_robotcs_y = 0.5 * self.map_width - (float(row) + 0.5) * self.grid_resolution
                 relative_robotcs_angle = math.atan2(relative_robotcs_y, relative_robotcs_x)
-                self.precast_map_angle_id[row, col] = get_angle_id(relative_robotcs_angle)
+                self.precast_map_angle_id[row, col] = self.get_angle_id(relative_robotcs_angle)
                 self.precast_map_range[row, col] = self.get_distance(relative_robotcs_x, relative_robotcs_y)
 
     def human_loader(self):
@@ -113,8 +105,9 @@ class RayCast(object):
                         self.lidar.ranges[target_angle_id] = target_range
 
     
-    def executor(self):
-        self.precast()
+    def laserscan_callback(self, is_first):
+        if is_first
+            self.precast()
         self.human_loader()
         self.human_transformer()
         self.grid_plotter()
