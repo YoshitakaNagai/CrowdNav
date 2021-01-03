@@ -127,5 +127,5 @@ class TemporalGridMap(object):
         
         temporal_bev = temporal_bev_fuser()
         
-        return temporal_bev
+        return temporal_bev, dyaw
 

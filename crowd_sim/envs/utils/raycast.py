@@ -7,7 +7,7 @@ from crowd_sim.envs.utils.cell import Cell
 
 
 class RayCast(object):
-    def __init__(self, map_width, grid_num, ray_fov, ray_num, robot_data, ob_data, human_num, human_action_num):
+    def __init__(self, map_width, grid_num, ray_fov, ray_num, robot_data, human_data):
         self.map_width = map_width
         self.grid_num = grid_num
         self.grid_resolution
@@ -17,11 +17,11 @@ class RayCast(object):
         self.precast_map_angle_id = np.zeros((grid_num, grid_num))
         self.precast_map_range = np.zeros((grid_num, grid_num))
         self.grid_map = np.zeros((grid_num, grid_num))
-        self.ob_data = ob_data
+        self.human_data = human_data
+        self.human_num = len(human_data)
         self.robot_data = robot_data
         self.human_data = [None]
         self.human_num = human_num
-        self.human_action_num = human_action_num
         self.robotcs_human_data = [None]
         self.lidar = LiDAR(ray_num, ray_fov)
         self.human_distance_list = [None]
@@ -56,7 +56,7 @@ class RayCast(object):
     def human_loader(self):
         self.human_data.clear()
         for human_id, action_id in zip(self.human_num, self.human_action_num):
-            self.human_data.append(self.ob_data[human_id])
+            self.human_data.append(self.human_data[human_id])
 
     def human_transformer(self):
         self.robotcs_human_data = copy.deepcopy(self.human_data)

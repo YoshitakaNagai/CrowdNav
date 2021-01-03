@@ -2,12 +2,16 @@ import logging
 import gym
 import matplotlib.lines as mlines
 import numpy as np
+import math
 import rvo2
 from matplotlib import patches
 from numpy.linalg import norm
 from crowd_sim.envs.utils.human import Human
 from crowd_sim.envs.utils.info import *
 from crowd_sim.envs.utils.utils import point_to_segment_dist
+from crowd_sim.envs.utils.raycast import RayCast
+from crowd_sim.envs.utils.lidar import LiDAR
+from crowd_sim.envs.utils.temporal_grid_map import TemporalGridMap
 
 
 class CrowdSim(gym.Env):
@@ -27,11 +31,20 @@ class CrowdSim(gym.Env):
         self.humans = None
         self.global_time = None
         self.human_times = None
+        self.is_first = True
+        self.temporal_bev = None
+        self.robot_velocity = None
         # reward function
         self.success_reward = None
         self.collision_penalty = None
+        self.epsilon = None
+        self.r_s = None
         self.discomfort_dist = None
         self.discomfort_penalty_factor = None
+        self.relative_goal = None
+        self.relative_goal_angle = None
+        self.now_goal_distance = None
+        self.last_goal_distance = None
         # simulation configuration
         self.config = None
         self.case_capacity = None
@@ -55,8 +68,17 @@ class CrowdSim(gym.Env):
         self.randomize_attributes = config.getboolean('env', 'randomize_attributes')
         self.success_reward = config.getfloat('reward', 'success_reward')
         self.collision_penalty = config.getfloat('reward', 'collision_penalty')
+        self.epsilon = config.getfloat('reward', 'epsilon')
+        self.r_s = config.getfloat('reward', 'r_s')
         self.discomfort_dist = config.getfloat('reward', 'discomfort_dist')
         self.discomfort_penalty_factor = config.getfloat('reward', 'discomfort_penalty_factor')
+        self.map_width = config.getfloat('sim', 'map_width')
+        self.grid_num = config.getint('sim', 'grid_num')
+        self.ray_fov = config.getfloat('sim', 'ray_fov')
+        self.grid_num = config.getint('sim', 'ray_num')
+        self.brightness_decreas_rate = config.getfloat('sim', 'brightness_decreas_rate')
+        # import math
+        self.memory_num = config.getint('sim', 'memory_num')
         if self.config.get('humans', 'policy') == 'orca':
             self.case_capacity = {'train': np.iinfo(np.uint32).max - 2000, 'val': 1000, 'test': 1000}
             self.case_size = {'train': np.iinfo(np.uint32).max - 2000, 'val': config.getint('env', 'val_size'),
@@ -305,14 +327,30 @@ class CrowdSim(gym.Env):
 
         # get current observation
         if self.robot.sensor == 'coordinates':
-            ob_data = [human.get_observable_state() for human in self.humans]
+            ob = [human.get_observable_state() for human in self.humans]
+        elif self.robot.sensor == 'LiDAR':
+            self.is_first = True
+            ob = [human.get_observable_state() for human in self.humans]
+            raycast = RayCast(self.map_width, self.grid_num, self.ray_fov, self.ray_num, self.robot, ob)
+            laserscan = raycast.laserscan_callback(self.is_first)
+            temporal_grid_map = TemporalGridMap(self.map_width, self.grid_num, self.ray_num, self.memory_num, self.brightness_decreas_rate)
+            self.temporal_bev, dyaw = temporal_grid_map.temporal_bev_generator(self.robot, laserscan, self.is_first)
+            vx = self.robot.vx
+            vx = self.robot.vy
+            linear_v = math.sqrt(vx * vx + vy * vy)
+            angular_v = dyaw / self.time_step
+            self.robot_velocity = [linear_v, angular_v]
+            end_position = np.array([self.robot.px, self.robot.py])
+            dx = self.robot.gx - self.robot.px
+            dy = self.robot.gy - self.robot.py
+            self.relative_goal_angle = math.atan2(dy, dx)
+            self.now_goal_distance = norm(end_position - np.array(self.robot.get_goal_position()))
+            self.relative_goal = [self.now_goal_distance, self.relative_goal_angle]
+            self.is_first = False
         elif self.robot.sensor == 'RGB':
             raise NotImplementedError
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         return ob
+        
 
     def onestep_lookahead(self, action):
         return self.step(action, update=False)
@@ -366,7 +404,10 @@ class CrowdSim(gym.Env):
 
         # check if reaching the goal
         end_position = np.array(self.robot.compute_position(action, self.time_step))
+        self.now_goal_distance = norm(end_position - np.array(self.robot.get_goal_position()))
         reaching_goal = norm(end_position - np.array(self.robot.get_goal_position())) < self.robot.radius
+        if is_first:
+            self.last_goal_distance = self.now_goal_distance
 
         if self.global_time >= self.time_limit - 1:
             reward = 0
@@ -380,20 +421,14 @@ class CrowdSim(gym.Env):
             reward = self.success_reward
             done = True
             info = ReachGoal()
-        elif dmin < self.discomfort_dist:
-            # only penalize agent for getting too close if it's visible
-            # adjust the reward based on FPS
-            reward = (dmin - self.discomfort_dist) * self.discomfort_penalty_factor * self.time_step
-            done = False
-            info = Danger(dmin)
         else:
-            reward = 0
+            reward = self.epsilon * (self.now_goal_distance - self.last_goal_distance) + self.r_s
             done = False
             info = Nothing()
 
         if update:
             # store state, action value and attention weights
-            self.states.append([self.robot.get_full_state(), [human.get_full_state() for human in self.humans]])
+            self.states.append([self.temporal_bev, self.relative_goal_angle, self.robot_velocity])
             if hasattr(self.robot.policy, 'action_values'):
                 self.action_values.append(self.robot.policy.action_values)
             if hasattr(self.robot.policy, 'get_attention_weights'):
@@ -411,39 +446,62 @@ class CrowdSim(gym.Env):
 
             # compute the observation
             if self.robot.sensor == 'coordinates':
-                ob_data = [human.get_observable_state() for human in self.humans]
+                ob = [human.get_observable_state() for human in self.humans]
             elif self.robot.sensor == 'RGB':
                 raise NotImplementedError
+            elif self.robot.sensor == 'LiDAR':
+                ob_human = [human.get_observable_state() for human in self.humans]
+                raycast = RayCast(self.map_width, self.grid_num, self.ray_fov, self.ray_num, self.robot, ob_human)
+                laserscan = raycast.laserscan_callback(self.is_first)
+                self.temporal_grid_map = TemporalGridMap(self.map_width, self.grid_num, self.ray_num, self.memory_num, self.brightness_decreas_rate)
+                self.temporal_bev, dyaw = temporal_grid_map.temporal_bev_generator(self.robot, laserscan, self.is_first)
+                vx = self.robot.vx
+                vx = self.robot.vy
+                linear_v = math.sqrt(vx * vx + vy * vy)
+                angular_v = dyaw / self.time_step
+                self.robot_velocity = [linear_v, angular_v]
+                dx = self.robot.gx - self.robot.px
+                dy = self.robot.gy - self.robot.py
+                self.relative_goal_angle = math.atan2(dy, dx)
+                self.now_goal_distance = norm(end_position - np.array(self.robot.get_goal_position()))
+                self.relative_goal = [self.now_goal_distance, self.relative_goal_angle]
+                # return temporal_bev, robot_velocity
         else:
             if self.robot.sensor == 'coordinates':
                 ob_data = [human.get_next_observable_state(action) for human, action in zip(self.humans, human_actions)]
             elif self.robot.sensor == 'RGB':
                 raise NotImplementedError
-            # store state, action value and attention weights
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            elif self.robot.sensor == 'LiDAR':
+                ob_human = [human.get_observable_state() for human in self.humans]
+                raycast = RayCast(self.map_width, self.grid_num, self.ray_fov, self.ray_num, self.robot, ob_human)
+                laserscan = raycast.laserscan_callback(self.is_first)
+                temporal_grid_map = TemporalGridMap(self.map_width, self.grid_num, self.ray_num, self.memory_num, self.brightness_decreas_rate)
+                self.temporal_bev, dyaw = temporal_grid_map.temporal_bev_generator(self.robot, laserscan, self.is_first)
+                vx = self.robot.vx
+                vx = self.robot.vy
+                linear_v = math.sqrt(vx * vx + vy * vy)
+                angular_v = dyaw / self.time_step
+                self.robot_velocity = [linear_v, angular_v]
+                dx = self.robot.gx - self.robot.px
+                dy = self.robot.gy - self.robot.py
+                self.relative_goal_angle = math.atan2(dy, dx)
+                self.now_goal_distance = norm(end_position - np.array(self.robot.get_goal_position()))
+                self.relative_goal = [self.now_goal_distance, self.relative_goal_angle]
 
-            # update all agents
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        return ob, reward, done, info, self.temporal_bev, self.relative_goal, self.robot_velocity
 
-            # compute the observation
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-        else:
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-        return ob, reward, done, info
+    def sensing_render(self):
+        from matplotlib import animation
+        import matplotlib.pyplot as plt
+        map_min = -0.5 * self.map_width
+        map_max = 0.5 * self.map_width
+        plt_linspace = np.linspace(map_min, map_max, self.grid_num)
+        row, col = np.meshgrid(plt_linspace, plt_linspace)
+        plt.pcolormesh(row, col, self.temporal_bev, cmap='binary')
+        plt.xlabel('x', fontsize=10)
+        plt.ylabel('y', fontsize=10)
+        plt.show()
+        
 
     def render(self, mode='human', output_file=None):
         from matplotlib import animation
