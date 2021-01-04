@@ -2,8 +2,13 @@ import torch
 import torch.nn
 import torch.optim as optim
 import torch.nn.functional as F
+import numpy as np
+import itertools
+import logging
+from crowd_sim.envs.policy.policy import Policy
+from crowd_sim.envs.utils.action import ActionRot, ActionXY
+from crowd_sim.envs.utils.state import ObservableState, FullState
 
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Network(nn.Module):
     def __init__(self, input_channels, outputs, batch_size, device):
@@ -84,8 +89,43 @@ class Network(nn.Module):
         return output
 
 
+class DDQN(Policy):
+    def __init__(self):
+        super().__init__()
+        self.name = 'DDQN'
+        self.trainable = True
+        self.multiagent_training = None
+        self.kinematics = None
+        self.epsilon = None
+        self.gamma = None
+        self.sampling = None
+        self.speed_samples = None
+        self.rotation_samples = None
+        self.query_env = None
+        self.action_space = None
+        self.speeds = None
+        self.rotations = None
+        self.action_values = None
+        self.with_om = None
+        self.cell_num = None
+        self.cell_size = None
+        self.om_channel_size = None
+        self.self_state_dim = 6
+        self.human_state_dim = 7
+        self.joint_state_dim = self.self_state_dim + self.human_state_dim
 
+    def configure(self, config):
+        self.model = Network(1, 28)
+        logging.info('Policy: DDQN for flow field based motion planner')
 
+    def set_device(self, device):
+        self.device = device
+        self.model.to(device)
+
+    def predict(self, state_m, state_g, state_b):
+        output = self.model(state_m, state_g, state_b)
+
+        return max_action
 
 
 

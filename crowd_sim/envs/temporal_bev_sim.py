@@ -349,7 +349,8 @@ class CrowdSim(gym.Env):
             self.is_first = False
         elif self.robot.sensor == 'RGB':
             raise NotImplementedError
-        return ob
+        #return ob
+        return self.temporal_bev, self.relative_goal, self.robot_velocity
         
 
     def onestep_lookahead(self, action):
@@ -488,7 +489,8 @@ class CrowdSim(gym.Env):
                 self.now_goal_distance = norm(end_position - np.array(self.robot.get_goal_position()))
                 self.relative_goal = [self.now_goal_distance, self.relative_goal_angle]
 
-        return ob, reward, done, info, self.temporal_bev, self.relative_goal, self.robot_velocity
+        #return ob, reward, done, info, self.temporal_bev, self.relative_goal, self.robot_velocity
+        return self.temporal_bev, self.relative_goal, self.robot_velocity, reward, done, info
 
     def sensing_render(self):
         from matplotlib import animation
